@@ -1,0 +1,11 @@
+.env
+
+pycache/
+*.pyc
+
+image_detection/__pycache__/
+image_detection/*.pyc
+
+image_detection/chatgpt_01.png
+image_detection/gemini_01.png
+image_detection/real_01.png
