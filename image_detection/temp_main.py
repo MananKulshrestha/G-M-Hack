@@ -13,12 +13,6 @@ from termcolor import colored
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# --- FIX: Silence noisy third-party logs ---
-# This prevents the "HTTP Request: GET..." lines from cluttering your terminal
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
-
 # Load environment variables (API Key)
 load_dotenv(find_dotenv())
 
@@ -29,6 +23,7 @@ ENSEMBLE_CONFIG = [
         "name": "Semantic Baseline (ViT)",
         "weight": 0.15,
         "target_label": "fake",
+        # Keys must be lowercase for the new robust matching logic
         "label_mapping": {"label_0": "fake", "label_1": "real"}
     },
     {
@@ -36,7 +31,8 @@ ENSEMBLE_CONFIG = [
         "name": "Diffusion Specialist (Swin)",
         "weight": 0.25,
         "target_label": "artificial",
-        # Inverted mapping: 'human' labels from this model are treated as 'fake'
+        # Updated: INVERTED mapping based on empirical evidence (Model labels appear swapped)
+        # Treating 'human' as 'fake' and 'artificial' as 'real' to align with 100-acc observation
         "label_mapping": {
             "label_1": "real", 
             "label_0": "fake", 
@@ -127,8 +123,7 @@ class EnsembleDetector:
             
             # DEBUG: If probability is extremely low for the Swin model, print why
             if "Swin" in config["name"] and fake_prob < 0.01:
-                # Only print debug info if not 400 error
-                pass 
+                print(f"{colored('DEBUG:', 'yellow')} Swin Raw Output -> {response} | Interpreted as {fake_prob:.4f} Fake")
                         
         except Exception as e:
             logger.warning(f"Normalization error for {config['name']}: {e}")
@@ -147,10 +142,12 @@ class EnsembleDetector:
         }
 
         try:
-            # FIX: We pass the PATH directly (string), not bytes.
-            # Hugging Face library will detect the extension (e.g., .jpg) and set the
-            # correct Content-Type header automatically.
-            response = await client.image_classification(image_path)
+            # FIX: Read bytes explicitly to avoid "BufferedReader" errors
+            with open(image_path, "rb") as f:
+                image_bytes = f.read()
+            
+            # The async call happens here, inside the async function
+            response = await client.image_classification(image_bytes)
             
             # Validate response structure
             if not response:
@@ -171,9 +168,6 @@ class EnsembleDetector:
             if "404" in error_msg:
                 logger.warning(f"Model {config['name']} is offline or missing (404).")
                 result["error"] = "Model Offline (404)"
-            elif "400" in error_msg:
-                 logger.error(f"Model {config['name']} rejected request: {error_msg}")
-                 result["error"] = "Bad Request (400)"
             else:
                 logger.error(f"Failed to query {config['name']}: {e}")
                 result["error"] = error_msg
@@ -212,7 +206,7 @@ class EnsembleDetector:
                 success_count += 1
         
         if success_count == 0:
-            return {"error": "All API calls failed. Check internet, API token, or file format."}
+            return {"error": "All API calls failed. Check internet or API token."}
 
         # --- 1. Global Ensemble Calculation ---
         if total_weight > 0:
@@ -224,6 +218,7 @@ class EnsembleDetector:
         entropy = self.calculate_entropy(ensemble_prob)
 
         # --- 2. Top 3 Analysis (Models leaning Fake) ---
+        # Sort results by fake_prob in descending order (Highest Fake prob first)
         sorted_results = sorted(valid_results, key=lambda x: x["fake_prob"], reverse=True)
         top3_results = sorted_results[:3]
 
@@ -238,7 +233,10 @@ class EnsembleDetector:
         top3_entropy = self.calculate_entropy(top3_confidence)
 
         # --- 3. Bottom 3 Analysis (Models leaning Real) ---
+        # Get the models with the LOWEST fake probability (Highest Real prob)
+        # Slicing [-3:] gives the last 3 items of the descending list (which are the smallest values)
         bottom3_results = sorted_results[-3:]
+
         bottom3_weight_sum = sum(r["weight"] for r in bottom3_results)
         bottom3_weighted_prob_sum = sum(r["weight"] * r["fake_prob"] for r in bottom3_results)
 
@@ -322,3 +320,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    print("hey")

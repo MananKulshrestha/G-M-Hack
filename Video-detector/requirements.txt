@@ -1,0 +1,8 @@
+torch
+transformers
+mediapipe
+opencv-python
+pillow
+scipy
+numpy
+timm
