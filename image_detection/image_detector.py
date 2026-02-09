@@ -1,42 +1,36 @@
-import asyncio
 import os
 import math
-import json
 import logging
 import argparse
+import torch
+import warnings
 from typing import Dict, List, Any
-from dotenv import load_dotenv, find_dotenv
-from huggingface_hub import AsyncInferenceClient
+from transformers import pipeline
 from termcolor import colored
+from PIL import Image
+
+# Suppress warnings
+warnings.filterwarnings("ignore")
+logging.getLogger("transformers").setLevel(logging.ERROR)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# --- FIX: Silence noisy third-party logs ---
-# This prevents the "HTTP Request: GET..." lines from cluttering your terminal
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
-
-# Load environment variables (API Key)
-load_dotenv(find_dotenv())
-
-# --- CONFIGURATION (UPDATED FOR STABILITY) ---
+# --- CONFIGURATION ---
 ENSEMBLE_CONFIG = [
     {
         "id": "dima806/deepfake_vs_real_image_detection",
         "name": "Semantic Baseline (ViT)",
-        "weight": 0.15,
+        "weight": 0.10,
         "target_label": "fake",
         "label_mapping": {"label_0": "fake", "label_1": "real"}
     },
     {
         "id": "Organika/sdxl-detector",
         "name": "Diffusion Specialist (Swin)",
-        "weight": 0.25,
+        "weight": 0.50,
         "target_label": "artificial",
-        # Inverted mapping: 'human' labels from this model are treated as 'fake'
         "label_mapping": {
             "label_1": "real", 
             "label_0": "fake", 
@@ -45,214 +39,201 @@ ENSEMBLE_CONFIG = [
         }
     },
     {
-        "id": "prithivMLmods/Deep-Fake-Detector-Model",
+        "id": "prithivMLmods/Deep-Fake-Detector-v2-Model",
         "name": "Generalist Forensics", 
-        "weight": 0.20,
-        "target_label": "Fake",
-        "label_mapping": {"fake": "fake", "real": "real"}
+        "weight": 0.15,
+        "target_label": "Deepfake",
+        "label_mapping": {"deepfake": "fake", "realism": "real"}
     },
     {
         "id": "dima806/ai_vs_real_image_detection",
         "name": "Broad AI/Real Classifier",
-        "weight": 0.20,
+        "weight": 0.15,
         "target_label": "AI",
         "label_mapping": {"ai": "fake", "real": "real"}
     },
     {
         "id": "umm-maybe/AI-image-detector",
         "name": "Artistic/Style Analyst",
-        "weight": 0.20,
+        "weight": 0.10,
         "target_label": "artificial",
         "label_mapping": {"artificial": "fake", "human": "real"}
     }
 ]
 
-class EnsembleDetector:
-    def __init__(self, token: str):
-        if not token:
-            raise ValueError("Hugging Face API Token is missing. Please set HF_TOKEN in .env file.")
-        self.token = token
-        
-        self.clients = {
-            cfg["id"]: AsyncInferenceClient(model=cfg["id"], token=self.token)
-            for cfg in ENSEMBLE_CONFIG
-        }
+class LocalImageDetector:
+    def __init__(self):
+        print(colored("Loading models locally... (This may take a while first time)", "cyan"))
+        self.pipelines = {}
+        self.device = 0 if torch.cuda.is_available() else -1
+        print(f"Inference Device: {'GPU' if self.device == 0 else 'CPU'}")
 
-    def _normalize_prediction(self, response: Any, config: Dict) -> float:
-        """Normalizes diverse API outputs into a single 'fake_probability'."""
+        for config in ENSEMBLE_CONFIG:
+            try:
+                print(f"  - Loading {config['name']}...")
+                pipe = pipeline("image-classification", model=config['id'], device=self.device)
+                self.pipelines[config['id']] = pipe
+            except Exception as e:
+                print(colored(f"  ❌ Failed to load {config['name']}: {e}", "red"))
+
+        if not self.pipelines:
+            raise RuntimeError("No models could be loaded.")
+
+    def _normalize_prediction(self, predictions, config) -> float:
+        """Converts model output to a 'fake_probability' float."""
         fake_prob = 0.5 
         
         try:
-            if isinstance(response, dict):
-                response = [response]
-            
-            # If API returns None or empty list
-            if not response:
-                return 0.5
-
             found_fake = False
-            
-            # Logic: Look for the label that implies "Fake"
-            for item in response:
-                label_raw = str(item.get('label', '')).strip()
-                label_lower = label_raw.lower() # Force lowercase for robust matching
-                score = item.get('score', 0.0)
+            for item in predictions:
+                label_lower = str(item['label']).lower()
+                score = float(item['score'])
                 
-                # 1. Check Explicit Mapping (Robust Lowercase Check)
                 if config['label_mapping']:
-                    mapped_label = config['label_mapping'].get(label_lower)
-                    if mapped_label == 'fake':
+                    mapped = config['label_mapping'].get(label_lower)
+                    if mapped == 'fake':
                         fake_prob = score
                         found_fake = True
                         break
-                    elif mapped_label == 'real':
+                    elif mapped == 'real':
                         fake_prob = 1.0 - score
                         found_fake = True
                         break
-                
-                # 2. Check String Similarity (Fallback)
-                target = config['target_label'].lower()
-                if label_lower == target or label_lower == 'fake' or label_lower == 'artificial':
-                    fake_prob = score
-                    found_fake = True
-                    break
             
-            # 3. Invert if we only found 'Real'
             if not found_fake:
-                for item in response:
-                    label_lower = str(item.get('label', '')).lower()
-                    if label_lower in ['real', 'human', '0', 'label_1']: 
-                        fake_prob = 1.0 - item.get('score', 0.0)
+                target = config['target_label'].lower()
+                for item in predictions:
+                    if str(item['label']).lower() == target:
+                        fake_prob = float(item['score'])
                         break
-            
-            # DEBUG: If probability is extremely low for the Swin model, print why
-            if "Swin" in config["name"] and fake_prob < 0.01:
-                # Only print debug info if not 400 error
-                pass 
-                        
+
         except Exception as e:
-            logger.warning(f"Normalization error for {config['name']}: {e}")
+            logger.warning(f"Norm Error: {e}")
             
         return fake_prob
-
-    async def query_single_model(self, config: Dict, image_path: str) -> Dict:
-        """Queries a single model asynchronously."""
-        client = self.clients[config["id"]]
-        result = {
-            "model_name": config["name"],
-            "model_id": config["id"],
-            "weight": config["weight"],
-            "fake_prob": 0.5,
-            "status": "pending"
-        }
-
-        try:
-            # FIX: We pass the PATH directly (string), not bytes.
-            # Hugging Face library will detect the extension (e.g., .jpg) and set the
-            # correct Content-Type header automatically.
-            response = await client.image_classification(image_path)
-            
-            # Validate response structure
-            if not response:
-                raise ValueError("Empty response from API")
-
-            # Normalization happens synchronously here
-            result["fake_prob"] = self._normalize_prediction(response, config)
-            result["status"] = "success"
-
-        except (StopAsyncIteration, StopIteration, RuntimeError) as e:
-            error_msg = str(e) if str(e) else "Empty Stream/StopIteration"
-            logger.warning(f"Model {config['name']} stream ended unexpectedly: {error_msg}")
-            result["status"] = "failed"
-            result["error"] = "Model Response Error (Try again later)"
-            
-        except Exception as e:
-            error_msg = str(e)
-            if "404" in error_msg:
-                logger.warning(f"Model {config['name']} is offline or missing (404).")
-                result["error"] = "Model Offline (404)"
-            elif "400" in error_msg:
-                 logger.error(f"Model {config['name']} rejected request: {error_msg}")
-                 result["error"] = "Bad Request (400)"
-            else:
-                logger.error(f"Failed to query {config['name']}: {e}")
-                result["error"] = error_msg
-            result["status"] = "failed"
-            
-        return result
 
     def calculate_entropy(self, probability: float) -> float:
         if probability <= 0 or probability >= 1:
             return 0.0
         return - (probability * math.log2(probability) + (1 - probability) * math.log2(1 - probability))
 
-    async def analyze_image(self, image_path: str):
+    def analyze_image(self, image_path: str) -> Dict:
+        """Analyzes a single image file and returns detailed metrics."""
         if not os.path.exists(image_path):
             return {"error": "Image file not found."}
 
-        logger.info(f"Dispatching requests to {len(ENSEMBLE_CONFIG)} models...")
-        
-        tasks = [self.query_single_model(cfg, image_path) for cfg in ENSEMBLE_CONFIG]
-        results = await asyncio.gather(*tasks)
+        try:
+            pil_image = Image.open(image_path).convert("RGB")
+        except Exception as e:
+            return {"error": f"Image load error: {e}"}
 
+        model_map = {}
+        
+        # 1. Inference Pass
+        for config in ENSEMBLE_CONFIG:
+            model_id = config['id']
+            if model_id not in self.pipelines:
+                continue
+                
+            try:
+                pipe = self.pipelines[model_id]
+                output = pipe(pil_image)
+                
+                fake_prob = self._normalize_prediction(output, config)
+                
+                # Default Swin Logic (Inverted)
+                if "Swin" in config["name"]:
+                    fake_prob = 1.0 - fake_prob
+
+                model_map[config["name"]] = {
+                    "weight": config["weight"],
+                    "fake_prob": fake_prob,
+                    "status": "success",
+                    "model_name": config["name"]
+                }
+                
+            except Exception as e:
+                model_map[config["name"]] = {
+                    "model_name": config["name"],
+                    "error": str(e),
+                    "status": "failed"
+                }
+
+        # 2. Logic Pass: Conditional Swin Logic
+        try:
+            swin_key = "Diffusion Specialist (Swin)"
+            art_key = "Artistic/Style Analyst"
+            broad_key = "Broad AI/Real Classifier"
+            gen_key = "Generalist Forensics"
+
+            def get_prob(name):
+                if name in model_map and model_map[name]["status"] == "success":
+                    return model_map[name]["fake_prob"]
+                return None
+
+            p_swin = get_prob(swin_key)
+            p_art = get_prob(art_key)
+            p_broad = get_prob(broad_key)
+            p_gen = get_prob(gen_key)
+
+            if all(p is not None for p in [p_swin, p_art, p_broad, p_gen]):
+                # Condition 1: Strict Consensus
+                cond_1 = (p_art > 0.70 and p_broad > 0.70 and p_gen > 0.70 and p_swin < 0.40)
+                
+                # Condition 2: Max confidence > 80% and others > 65% while Swin is low < 35%
+                others = sorted([p_art, p_broad, p_gen]) # Sort [lowest, mid, highest]
+                cond_2 = (others[2] > 0.80 and others[0] > 0.65 and p_swin < 0.35)
+
+                if cond_1 or cond_2:
+                    # Logic triggered: Invert Swin (100 - prob)
+                    new_swin = 1.0 - p_swin
+                    model_map[swin_key]["fake_prob"] = new_swin
+                    print(colored("! Conditional Logic Triggered: Swin Model Inverted due to strong consensus from others.", "yellow"))
+        except Exception:
+            pass
+
+        # 3. Aggregation Pass
+        valid_results = []
         total_weight = 0.0
         weighted_sum = 0.0
         probs = []
-        valid_results = []
 
-        success_count = 0
-        for res in results:
-            if res["status"] == "success":
-                w = res["weight"]
-                p = res["fake_prob"]
+        for name, data in model_map.items():
+            if data["status"] == "success":
+                valid_results.append(data)
+                w = data["weight"]
+                p = data["fake_prob"]
                 weighted_sum += w * p
                 total_weight += w
                 probs.append(p)
-                valid_results.append(res)
-                success_count += 1
-        
-        if success_count == 0:
-            return {"error": "All API calls failed. Check internet, API token, or file format."}
 
-        # --- 1. Global Ensemble Calculation ---
-        if total_weight > 0:
-            ensemble_prob = weighted_sum / total_weight
-        else:
-            ensemble_prob = sum(probs) / len(probs)
-        
+        if total_weight == 0:
+            return {"error": "All models failed to analyze image."}
+
+        ensemble_prob = weighted_sum / total_weight
         variance = sum([((p - ensemble_prob) ** 2) for p in probs]) / len(probs) if probs else 0
         entropy = self.calculate_entropy(ensemble_prob)
 
-        # --- 2. Top 3 Analysis (Models leaning Fake) ---
+        # 4. Advanced Metrics (Top 3 / Bottom 3)
         sorted_results = sorted(valid_results, key=lambda x: x["fake_prob"], reverse=True)
-        top3_results = sorted_results[:3]
-
-        top3_weight_sum = sum(r["weight"] for r in top3_results)
-        top3_weighted_prob_sum = sum(r["weight"] * r["fake_prob"] for r in top3_results)
         
-        if top3_weight_sum > 0:
-            top3_confidence = top3_weighted_prob_sum / top3_weight_sum
-        else:
-             top3_confidence = sum(r["fake_prob"] for r in top3_results) / len(top3_results) if top3_results else 0.0
+        # Top 3
+        top3 = sorted_results[:3]
+        top3_w_sum = sum(r["weight"] for r in top3)
+        top3_w_prob = sum(r["weight"] * r["fake_prob"] for r in top3)
+        top3_conf = top3_w_prob / top3_w_sum if top3_w_sum > 0 else 0.0
+        top3_entropy = self.calculate_entropy(top3_conf)
 
-        top3_entropy = self.calculate_entropy(top3_confidence)
-
-        # --- 3. Bottom 3 Analysis (Models leaning Real) ---
-        bottom3_results = sorted_results[-3:]
-        bottom3_weight_sum = sum(r["weight"] for r in bottom3_results)
-        bottom3_weighted_prob_sum = sum(r["weight"] * r["fake_prob"] for r in bottom3_results)
-
-        if bottom3_weight_sum > 0:
-            bottom3_confidence = bottom3_weighted_prob_sum / bottom3_weight_sum
-        else:
-            bottom3_confidence = sum(r["fake_prob"] for r in bottom3_results) / len(bottom3_results) if bottom3_results else 0.0
-
-        bottom3_entropy = self.calculate_entropy(bottom3_confidence)
+        # Bottom 3
+        bottom3 = sorted_results[-3:]
+        bottom3_w_sum = sum(r["weight"] for r in bottom3)
+        bottom3_w_prob = sum(r["weight"] * r["fake_prob"] for r in bottom3)
+        bottom3_conf = bottom3_w_prob / bottom3_w_sum if bottom3_w_sum > 0 else 0.0
+        bottom3_entropy = self.calculate_entropy(bottom3_conf)
 
         # Verdict Logic
         verdict = "UNCERTAIN"
         color = "yellow"
-        
         if ensemble_prob > 0.80:
             verdict = "FAKE"
             color = "red"
@@ -260,7 +241,7 @@ class EnsembleDetector:
             verdict = "REAL"
             color = "green"
         elif variance > 0.10: 
-            verdict = "CONTESTED/UNCERTAIN"
+            verdict = "CONTESTED"
             color = "magenta"
         else:
             verdict = "AMBIGUOUS"
@@ -269,56 +250,54 @@ class EnsembleDetector:
         return {
             "verdict": verdict,
             "verdict_color": color,
-            "ensemble_probability": round(ensemble_prob, 4),
+            "ensemble_probability": ensemble_prob,
             "uncertainty_metrics": {
-                "entropy": round(entropy, 4),
-                "variance": round(variance, 4),
-                "top3_confidence": round(top3_confidence, 4),
-                "top3_entropy": round(top3_entropy, 4),
-                "bottom3_confidence": round(bottom3_confidence, 4),
-                "bottom3_entropy": round(bottom3_entropy, 4)
+                "entropy": entropy,
+                "variance": variance,
+                "top3_confidence": top3_conf,
+                "top3_entropy": top3_entropy,
+                "bottom3_confidence": bottom3_conf,
+                "bottom3_entropy": bottom3_entropy
             },
-            "model_breakdown": results
+            "model_breakdown": valid_results
         }
 
-async def main():
-    parser = argparse.ArgumentParser(description="Asynchronous Ensemble Deepfake Detector")
-    parser.add_argument("image_path", help="Path to the local image file to analyze")
+def main():
+    parser = argparse.ArgumentParser(description="Local Ensemble Deepfake Image Detector")
+    parser.add_argument("image_path", help="Path to the local image file")
     args = parser.parse_args()
 
-    token = os.getenv("HF_TOKEN")
-    if not token:
-        print(colored("Error: HF_TOKEN not found.", "red"))
+    if not os.path.exists(args.image_path):
+        print(colored("Error: File not found.", "red"))
         return
 
     print(colored(f"\n--- Starting Analysis for: {args.image_path} ---", "blue"))
     
-    detector = EnsembleDetector(token)
-    analysis = await detector.analyze_image(args.image_path)
+    # Initialize logic (Loads models)
+    detector = LocalImageDetector()
+    analysis = detector.analyze_image(args.image_path)
 
     if "error" in analysis:
         print(colored(f"Critical Error: {analysis['error']}", "red"))
         return
 
+    # Print Report
     print("\n" + "="*50)
     print(f"FINAL VERDICT: {colored(analysis['verdict'], analysis['verdict_color'], attrs=['bold'])}")
     print(f"Confidence (Fake Probability): {analysis['ensemble_probability']*100:.2f}%")
-    print(f"Entropy (Uncertainty): {analysis['uncertainty_metrics']['entropy']}")
+    print(f"Entropy (Uncertainty): {analysis['uncertainty_metrics']['entropy']:.4f}")
     print("-" * 20)
     print(f"Top 3 Confidence: {analysis['uncertainty_metrics']['top3_confidence']*100:.2f}%")
-    print(f"Top 3 Entropy: {analysis['uncertainty_metrics']['top3_entropy']}")
+    print(f"Top 3 Entropy: {analysis['uncertainty_metrics']['top3_entropy']:.4f}")
     print(f"Bottom 3 Confidence: {analysis['uncertainty_metrics']['bottom3_confidence']*100:.2f}%")
-    print(f"Bottom 3 Entropy: {analysis['uncertainty_metrics']['bottom3_entropy']}")
+    print(f"Bottom 3 Entropy: {analysis['uncertainty_metrics']['bottom3_entropy']:.4f}")
     print("="*50 + "\n")
 
     print("--- Individual Model Results ---")
     for res in analysis["model_breakdown"]:
-        if res["status"] == "success":
-            prob = res["fake_prob"]
-            label_col = "red" if prob > 0.5 else "green"
-            print(f"[{res['model_name']}]: {colored(f'{prob*100:.1f}% Fake', label_col)}")
-        else:
-            print(f"[{res['model_name']}]: {colored('FAILED', 'red')} - {res.get('error')}")
+        prob = res["fake_prob"]
+        label_col = "red" if prob > 0.5 else "green"
+        print(f"[{res['model_name']}]: {colored(f'{prob*100:.1f}% Fake', label_col)}")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

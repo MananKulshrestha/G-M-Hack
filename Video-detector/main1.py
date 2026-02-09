@@ -135,11 +135,10 @@ class LocalEnsembleDetector:
         except Exception as e:
             return {"error": f"Image load error: {e}"}
 
-        results = []
-        total_weight = 0.0
-        weighted_sum = 0.0
-        probs = []
+        # Use a dictionary to store intermediate results for cross-referencing
+        model_map = {}
         
+        # 1. Inference Pass
         for config in ENSEMBLE_CONFIG:
             model_id = config['id']
             if model_id not in self.pipelines:
@@ -153,31 +152,69 @@ class LocalEnsembleDetector:
                 # Normalize
                 fake_prob = self._normalize_prediction(output, config)
                 
-                # Apply Inversion for Swin model
+                # Apply Unconditional Inversion for Swin model (legacy fix)
                 if "Swin" in config["name"]:
                     fake_prob = 1.0 - fake_prob
 
-                # Add to ensemble
-                weight = config['weight']
-                weighted_sum += weight * fake_prob
-                total_weight += weight
-                probs.append(fake_prob)
-                
-                results.append({
-                    "model_name": config["name"],
+                model_map[config["name"]] = {
+                    "weight": config["weight"],
                     "fake_prob": fake_prob,
-                    "status": "success"
-                })
+                    "status": "success",
+                    "model_name": config["name"]
+                }
                 
             except Exception as e:
-                results.append({
+                model_map[config["name"]] = {
                     "model_name": config["name"],
                     "error": str(e),
                     "status": "failed"
-                })
+                }
+
+        # 2. Logic Pass: Conditional Swin Logic
+        # Condition: Artistic > 70%, Broad > 70%, Generalist > 70% AND Swin < 40%
+        try:
+            swin_key = "Diffusion Specialist (Swin)"
+            art_key = "Artistic/Style Analyst"
+            broad_key = "Broad AI/Real Classifier"
+            gen_key = "Generalist Forensics"
+
+            def get_prob(name):
+                if name in model_map and model_map[name]["status"] == "success":
+                    return model_map[name]["fake_prob"]
+                return None
+
+            p_swin = get_prob(swin_key)
+            p_art = get_prob(art_key)
+            p_broad = get_prob(broad_key)
+            p_gen = get_prob(gen_key)
+
+            if all(p is not None for p in [p_swin, p_art, p_broad, p_gen]):
+                if (p_art > 0.70 and p_broad > 0.70 and p_gen > 0.70 and p_swin < 0.40):
+                    # Logic triggered: Invert Swin (100 - prob)
+                    new_swin = 1.0 - p_swin
+                    model_map[swin_key]["fake_prob"] = new_swin
+                    # Note: We update the value in place so aggregation uses the new value
+        except Exception:
+            pass # Fail safe if keys don't exist
+
+        # 3. Aggregation Pass
+        total_weight = 0.0
+        weighted_sum = 0.0
+        probs = []
+        final_results_list = []
+
+        for name, data in model_map.items():
+            final_results_list.append(data)
+            
+            if data["status"] == "success":
+                w = data["weight"]
+                p = data["fake_prob"]
+                weighted_sum += w * p
+                total_weight += w
+                probs.append(p)
 
         if total_weight == 0:
-            return {"ensemble_probability": 0.5, "entropy": 0.0, "variance": 0.0, "model_breakdown": results}
+            return {"ensemble_probability": 0.5, "entropy": 0.0, "variance": 0.0, "model_breakdown": final_results_list}
 
         ensemble_prob = weighted_sum / total_weight
         variance = sum([((p - ensemble_prob) ** 2) for p in probs]) / len(probs) if probs else 0
@@ -187,7 +224,7 @@ class LocalEnsembleDetector:
             "ensemble_probability": ensemble_prob,
             "entropy": entropy,
             "variance": variance,
-            "model_breakdown": results
+            "model_breakdown": final_results_list
         }
 
     async def analyze_image(self, image_path: str) -> Dict:
