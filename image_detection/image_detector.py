@@ -184,11 +184,14 @@ class LocalImageDetector:
                 others = sorted([p_art, p_broad, p_gen]) # Sort [lowest, mid, highest]
                 cond_2 = (others[2] > 0.80 and others[0] > 0.65 and p_swin < 0.35)
 
-                if cond_1 or cond_2:
+                # Condition 3: Generalist High, Swin Low, Artistic Low
+                cond_3 = (p_gen > 0.75 and p_swin < 0.01 and p_art < 0.35)
+
+                if cond_1 or cond_2 or cond_3:
                     # Logic triggered: Invert Swin (100 - prob)
                     new_swin = 1.0 - p_swin
                     model_map[swin_key]["fake_prob"] = new_swin
-                    print(colored("! Conditional Logic Triggered: Swin Model Inverted due to strong consensus from others.", "yellow"))
+                    print(colored("! Conditional Logic Triggered: Swin Model Inverted due to strong consensus or specific conditions.", "yellow"))
         except Exception:
             pass
 
@@ -200,12 +203,20 @@ class LocalImageDetector:
 
         for name, data in model_map.items():
             if data["status"] == "success":
-                valid_results.append(data)
                 w = data["weight"]
                 p = data["fake_prob"]
+                
+                # --- FINAL SWIN INVERSION (Forced) ---
+                if "Swin" in name:
+                    p = 1.0 - p
+                    data["fake_prob"] = p # Update display value
+                
                 weighted_sum += w * p
                 total_weight += w
                 probs.append(p)
+                valid_results.append(data)
+            else:
+                valid_results.append(data)
 
         if total_weight == 0:
             return {"error": "All models failed to analyze image."}
@@ -214,30 +225,13 @@ class LocalImageDetector:
         variance = sum([((p - ensemble_prob) ** 2) for p in probs]) / len(probs) if probs else 0
         entropy = self.calculate_entropy(ensemble_prob)
 
-        # 4. Advanced Metrics (Top 3 / Bottom 3)
-        sorted_results = sorted(valid_results, key=lambda x: x["fake_prob"], reverse=True)
-        
-        # Top 3
-        top3 = sorted_results[:3]
-        top3_w_sum = sum(r["weight"] for r in top3)
-        top3_w_prob = sum(r["weight"] * r["fake_prob"] for r in top3)
-        top3_conf = top3_w_prob / top3_w_sum if top3_w_sum > 0 else 0.0
-        top3_entropy = self.calculate_entropy(top3_conf)
-
-        # Bottom 3
-        bottom3 = sorted_results[-3:]
-        bottom3_w_sum = sum(r["weight"] for r in bottom3)
-        bottom3_w_prob = sum(r["weight"] * r["fake_prob"] for r in bottom3)
-        bottom3_conf = bottom3_w_prob / bottom3_w_sum if bottom3_w_sum > 0 else 0.0
-        bottom3_entropy = self.calculate_entropy(bottom3_conf)
-
         # Verdict Logic
         verdict = "UNCERTAIN"
         color = "yellow"
         if ensemble_prob > 0.80:
             verdict = "FAKE"
             color = "red"
-        elif ensemble_prob < 0.20:
+        elif ensemble_prob < 0.40:
             verdict = "REAL"
             color = "green"
         elif variance > 0.10: 
@@ -254,10 +248,6 @@ class LocalImageDetector:
             "uncertainty_metrics": {
                 "entropy": entropy,
                 "variance": variance,
-                "top3_confidence": top3_conf,
-                "top3_entropy": top3_entropy,
-                "bottom3_confidence": bottom3_conf,
-                "bottom3_entropy": bottom3_entropy
             },
             "model_breakdown": valid_results
         }
@@ -286,11 +276,6 @@ def main():
     print(f"FINAL VERDICT: {colored(analysis['verdict'], analysis['verdict_color'], attrs=['bold'])}")
     print(f"Confidence (Fake Probability): {analysis['ensemble_probability']*100:.2f}%")
     print(f"Entropy (Uncertainty): {analysis['uncertainty_metrics']['entropy']:.4f}")
-    print("-" * 20)
-    print(f"Top 3 Confidence: {analysis['uncertainty_metrics']['top3_confidence']*100:.2f}%")
-    print(f"Top 3 Entropy: {analysis['uncertainty_metrics']['top3_entropy']:.4f}")
-    print(f"Bottom 3 Confidence: {analysis['uncertainty_metrics']['bottom3_confidence']*100:.2f}%")
-    print(f"Bottom 3 Entropy: {analysis['uncertainty_metrics']['bottom3_entropy']:.4f}")
     print("="*50 + "\n")
 
     print("--- Individual Model Results ---")
