@@ -74,5 +74,17 @@
         "watermarked_url": "/static/watermarked/qr_c8be7d1b-8d77-4b36-9ca2-e0eb8d92dc26_image_gem.png",
         "timestamp": "515597.687",
         "type": "image"
+    },
+    "3112bcd4-2cee-4929-a42b-5dfd5a0776f8": {
+        "id": "3112bcd4-2cee-4929-a42b-5dfd5a0776f8",
+        "filename": "3112bcd4-2cee-4929-a42b-5dfd5a0776f8_real12jpeg.jpeg",
+        "verdict": "VERIFIED_REAL",
+        "confidence": 0.2586935500614345,
+        "tx_hash": "0x7abf10d7769af5d52d1aedc242b3709d16be9b65e58c6048679a907313ff38c3",
+        "hash": "332f5b5b04809fcb60bcffcceb1b5bbd57fbf3f75926b88d9f97f47a132457c6",
+        "original_url": "/static/uploads/3112bcd4-2cee-4929-a42b-5dfd5a0776f8_real12jpeg.jpeg",
+        "watermarked_url": "/static/watermarked/qr_3112bcd4-2cee-4929-a42b-5dfd5a0776f8_real12jpeg.jpeg",
+        "timestamp": "315736.747996083",
+        "type": "image"
     }
 }
