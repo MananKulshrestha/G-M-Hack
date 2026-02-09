@@ -1,0 +1,78 @@
+{
+    "05ece8ef-5014-4e04-ad15-0927fb312988": {
+        "id": "05ece8ef-5014-4e04-ad15-0927fb312988",
+        "filename": "05ece8ef-5014-4e04-ad15-0927fb312988_image_gem.png",
+        "verdict": "AMBIGUOUS",
+        "confidence": 0.7915245920419693,
+        "tx_hash": "0x50592da25b23cd18f03c4e084052ee30cd38e47aa1082c2f8e570301ecf7f482",
+        "original_url": "/static/uploads/05ece8ef-5014-4e04-ad15-0927fb312988_image_gem.png",
+        "watermarked_url": "/static/watermarked/qr_05ece8ef-5014-4e04-ad15-0927fb312988_image_gem.png",
+        "timestamp": "511722.281",
+        "type": "image"
+    },
+    "cbf8e4a2-1889-4cb2-af8e-282ec298241a": {
+        "id": "cbf8e4a2-1889-4cb2-af8e-282ec298241a",
+        "filename": "cbf8e4a2-1889-4cb2-af8e-282ec298241a_image_gem.png",
+        "verdict": "AMBIGUOUS",
+        "confidence": 0.7915245920419693,
+        "tx_hash": "0xc7521a2bc338e49fda104224283846f28e4eb7d3210dc8d1b6759bef36ace360",
+        "original_url": "/static/uploads/cbf8e4a2-1889-4cb2-af8e-282ec298241a_image_gem.png",
+        "watermarked_url": "/static/watermarked/qr_cbf8e4a2-1889-4cb2-af8e-282ec298241a_image_gem.png",
+        "timestamp": "514215.234",
+        "type": "image"
+    },
+    "ec5edfd2-4ce2-4024-bd03-9519d6fb554f": {
+        "id": "ec5edfd2-4ce2-4024-bd03-9519d6fb554f",
+        "filename": "ec5edfd2-4ce2-4024-bd03-9519d6fb554f_AI_short1.mp4",
+        "verdict": "FAKE VIDEO",
+        "confidence": 0.7428,
+        "tx_hash": "0x25d61909b587a59bbd03290d3328a9faf57bd6214dd8ae9328c1e7c39b46199d",
+        "original_url": "/static/uploads/ec5edfd2-4ce2-4024-bd03-9519d6fb554f_AI_short1.mp4",
+        "watermarked_url": "/static/watermarked/qr_ec5edfd2-4ce2-4024-bd03-9519d6fb554f_AI_short1.mp4",
+        "type": "video"
+    },
+    "074df7c0-7416-42ee-bdf0-1858f81dbf59": {
+        "id": "074df7c0-7416-42ee-bdf0-1858f81dbf59",
+        "filename": "074df7c0-7416-42ee-bdf0-1858f81dbf59_real12jpeg.jpeg",
+        "verdict": "REAL",
+        "confidence": 0.25879180214833464,
+        "tx_hash": "0x3bfb11bff8cc5a067a97eafce59309a3d911dcda0ef8f8229935888ee81644f7",
+        "original_url": "/static/uploads/074df7c0-7416-42ee-bdf0-1858f81dbf59_real12jpeg.jpeg",
+        "watermarked_url": "/static/watermarked/qr_074df7c0-7416-42ee-bdf0-1858f81dbf59_real12jpeg.jpeg",
+        "timestamp": "514737.234",
+        "type": "image"
+    },
+    "da2614fd-d2fb-4ed6-99cf-bb91fdaf5674": {
+        "id": "da2614fd-d2fb-4ed6-99cf-bb91fdaf5674",
+        "filename": "da2614fd-d2fb-4ed6-99cf-bb91fdaf5674_real2.jpeg",
+        "verdict": "REAL",
+        "confidence": 0.2552601544186473,
+        "tx_hash": "0xfb47a006fdc8de4c9125c7384746341f4aeb941189dbd3411152340b507473a6",
+        "original_url": "/static/uploads/da2614fd-d2fb-4ed6-99cf-bb91fdaf5674_real2.jpeg",
+        "watermarked_url": "/static/watermarked/qr_da2614fd-d2fb-4ed6-99cf-bb91fdaf5674_real2.jpeg",
+        "timestamp": "514827.953",
+        "type": "image"
+    },
+    "4dd71cd7-b82d-49fe-b57a-7fd9cfc4c92c": {
+        "id": "4dd71cd7-b82d-49fe-b57a-7fd9cfc4c92c",
+        "filename": "4dd71cd7-b82d-49fe-b57a-7fd9cfc4c92c_image_gem.png",
+        "verdict": "AMBIGUOUS",
+        "confidence": 0.7915245920419693,
+        "tx_hash": "0xa747c463ecbe5b6f5cf7bce645a95fade9d34b8e5a6f45de6b6cd496f9f12d9b",
+        "original_url": "/static/uploads/4dd71cd7-b82d-49fe-b57a-7fd9cfc4c92c_image_gem.png",
+        "watermarked_url": "/static/watermarked/qr_4dd71cd7-b82d-49fe-b57a-7fd9cfc4c92c_image_gem.png",
+        "timestamp": "514874.046",
+        "type": "image"
+    },
+    "c8be7d1b-8d77-4b36-9ca2-e0eb8d92dc26": {
+        "id": "c8be7d1b-8d77-4b36-9ca2-e0eb8d92dc26",
+        "filename": "c8be7d1b-8d77-4b36-9ca2-e0eb8d92dc26_image_gem.png",
+        "verdict": "AMBIGUOUS",
+        "confidence": 0.7915245920419693,
+        "tx_hash": "0x7fd013a9bf0fc28465d900ccb8e2f5252ef11a968f478eafc46e421714e73c25",
+        "original_url": "/static/uploads/c8be7d1b-8d77-4b36-9ca2-e0eb8d92dc26_image_gem.png",
+        "watermarked_url": "/static/watermarked/qr_c8be7d1b-8d77-4b36-9ca2-e0eb8d92dc26_image_gem.png",
+        "timestamp": "515597.687",
+        "type": "image"
+    }
+}
