@@ -4,3 +4,17 @@ python-multipart
 web3
 python-dotenv
 requests
+qrcode
+moviepy
+jinja2
+# AI & Processing Dependencies
+torch
+transformers
+mediapipe
+opencv-python
+pillow
+scipy
+numpy
+timm
+huggingface_hub
+termcolor
